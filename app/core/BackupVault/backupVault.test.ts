@@ -45,7 +45,6 @@ jest.mock('react-native-keychain', () => ({
   ),
 }));
 
-//TODO Mock the react-native-keychain module test the other functions inside backupVault
 /*
  These tests are extremely limited since we are unable to mock the react-native-keychain module
  Despite the fact that they are mocked in the jest setup file, they do not appear to be working.
@@ -255,6 +254,85 @@ describe('backupVault file', () => {
       const response = await getVaultFromBackup();
 
       expect(response).toEqual(mockedFailedResponse);
+    });
+
+    describe('additional backupVault scenarios', () => {
+      it('should handle successful vault backup with valid keyring state', async () => {
+        const keyringState: KeyringControllerState = {
+          vault: JSON.stringify({ test: 'vault-data' }),
+          keyrings: [
+            {
+              type: 'HD Key Tree',
+              accounts: ['0x123'],
+              metadata: { id: 'test-id', name: 'Test Keyring' },
+            },
+          ],
+          isUnlocked: true,
+        };
+
+        (setInternetCredentials as jest.Mock).mockResolvedValueOnce(true);
+
+        const response = await backupVault(keyringState);
+        expect(response.success).toBe(true);
+        expect(setInternetCredentials).toHaveBeenCalledWith(
+          VAULT_BACKUP_KEY,
+          VAULT_BACKUP_KEY,
+          keyringState.vault,
+        );
+      });
+
+      it('should handle backup when vault is already present', async () => {
+        (getInternetCredentials as jest.Mock).mockResolvedValueOnce({
+          password: 'existing-vault-data',
+        });
+
+        const keyringState: KeyringControllerState = {
+          vault: JSON.stringify({ new: 'vault-data' }),
+          keyrings: [],
+          isUnlocked: false,
+        };
+
+        (setInternetCredentials as jest.Mock).mockResolvedValueOnce(true);
+
+        const response = await backupVault(keyringState);
+        expect(response.success).toBe(true);
+      });
+
+      it('should handle getVaultFromBackup with corrupted data', async () => {
+        (getInternetCredentials as jest.Mock).mockResolvedValueOnce({
+          password: 'corrupted-vault-data',
+        });
+
+        const response = await getVaultFromBackup();
+        expect(response.success).toBe(true);
+        expect(response.vault).toBe('corrupted-vault-data');
+      });
+
+      it('should handle backup failure due to keychain error', async () => {
+        const keyringState: KeyringControllerState = {
+          vault: JSON.stringify({ test: 'vault-data' }),
+          keyrings: [],
+          isUnlocked: true,
+        };
+
+        (setInternetCredentials as jest.Mock).mockRejectedValueOnce(
+          new Error('Keychain access denied'),
+        );
+
+        const response = await backupVault(keyringState);
+        expect(response.success).toBe(false);
+        expect(response.error).toBe('Keychain access denied');
+      });
+
+      it('should handle getVaultFromBackup when no backup exists', async () => {
+        (getInternetCredentials as jest.Mock).mockRejectedValueOnce(
+          new Error('No credentials found'),
+        );
+
+        const response = await getVaultFromBackup();
+        expect(response.success).toBe(false);
+        expect(response.error).toBe('No credentials found');
+      });
     });
   });
 });

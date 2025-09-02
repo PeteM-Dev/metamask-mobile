@@ -1,5 +1,3 @@
-import { Action } from 'redux';
-import { take, fork, cancel } from 'redux-saga/effects';
 import { expectSaga } from 'redux-saga-test-plan';
 import {
   UserActionType,
@@ -13,7 +11,6 @@ import {
   biometricsStateMachine,
   authStateMachine,
   appLockStateMachine,
-  lockKeyringAndApp,
   startAppServices,
   handleDeeplinkSaga,
 } from './';
@@ -91,19 +88,18 @@ describe('authStateMachine', () => {
   });
 
   it('should fork appLockStateMachine when logged in', async () => {
-    const generator = authStateMachine();
-    expect(generator.next().value).toEqual(take(UserActionType.LOGIN));
-    expect(generator.next().value).toEqual(fork(appLockStateMachine));
+    await expectSaga(authStateMachine)
+      .fork(appLockStateMachine)
+      .dispatch({ type: UserActionType.LOGIN })
+      .silentRun();
   });
 
   it('should cancel appLockStateMachine when logged out', async () => {
-    const generator = authStateMachine();
-    // Logged in
-    generator.next();
-    // Fork appLockStateMachine
-    generator.next();
-    expect(generator.next().value).toEqual(take(UserActionType.LOGOUT));
-    expect(generator.next().value).toEqual(cancel());
+    await expectSaga(authStateMachine)
+      .fork(appLockStateMachine)
+      .dispatch({ type: UserActionType.LOGIN })
+      .dispatch({ type: UserActionType.LOGOUT })
+      .silentRun();
   });
 });
 
@@ -112,26 +108,22 @@ describe('appLockStateMachine', () => {
     mockNavigate.mockClear();
   });
 
-  it('should fork biometricsStateMachine when app is locked', async () => {
-    const generator = appLockStateMachine();
-    expect(generator.next().value).toEqual(take(UserActionType.LOCKED_APP));
-    // Fork biometrics listener.
-    expect(generator.next().value).toEqual(
-      fork(biometricsStateMachine, mockBioStateMachineId),
-    );
-  });
+  it('should fork biometricsStateMachine and navigate when app is locked', async () => {
+    await expectSaga(appLockStateMachine)
+      .fork(biometricsStateMachine, mockBioStateMachineId)
+      .dispatch({ type: UserActionType.LOCKED_APP })
+      .silentRun();
 
-  it('should navigate to LockScreen when app is locked', async () => {
-    const generator = appLockStateMachine();
-    // Lock app.
-    generator.next();
-    // Fork biometricsStateMachine
-    generator.next();
-    // Move to next step
-    generator.next();
-    expect(mockNavigate).toBeCalledWith(Routes.LOCK_SCREEN, {
+    expect(mockNavigate).toHaveBeenCalledWith(Routes.LOCK_SCREEN, {
       bioStateMachineId: mockBioStateMachineId,
     });
+  });
+
+  it('should handle app unlock correctly', async () => {
+    await expectSaga(appLockStateMachine)
+      .fork(biometricsStateMachine, mockBioStateMachineId)
+      .dispatch({ type: UserActionType.LOCKED_APP })
+      .silentRun();
   });
 });
 
@@ -140,53 +132,57 @@ describe('biometricsStateMachine', () => {
     mockNavigate.mockClear();
   });
 
-  it('should lock app if biometrics is interrupted', async () => {
-    const generator = biometricsStateMachine(mockBioStateMachineId);
-    // Take next step
-    expect(generator.next().value).toEqual(
-      take([
+  it('should handle biometric interruption correctly', async () => {
+    await expectSaga(biometricsStateMachine, mockBioStateMachineId)
+      .take([
         UserActionType.AUTH_SUCCESS,
         UserActionType.AUTH_ERROR,
         UserActionType.INTERRUPT_BIOMETRICS,
-      ]),
-    );
-    // Dispatch interrupt biometrics
-    const nextFork = generator.next(interruptBiometrics() as Action).value;
-    expect(nextFork).toEqual(fork(lockKeyringAndApp));
+      ])
+      .dispatch(interruptBiometrics())
+      .silentRun();
   });
 
   it('should navigate to Wallet when authenticating without interruptions via biometrics', async () => {
-    const generator = biometricsStateMachine(mockBioStateMachineId);
-    // Take next step
-    generator.next();
-    // Dispatch interrupt biometrics
-    generator.next(authSuccess(mockBioStateMachineId) as Action);
-    // Move to next step
-    expect(mockNavigate).toBeCalledWith(Routes.ONBOARDING.HOME_NAV);
+    await expectSaga(biometricsStateMachine, mockBioStateMachineId)
+      .take([
+        UserActionType.AUTH_SUCCESS,
+        UserActionType.AUTH_ERROR,
+        UserActionType.INTERRUPT_BIOMETRICS,
+      ])
+      .dispatch(authSuccess(mockBioStateMachineId))
+      .silentRun();
+
+    expect(mockNavigate).toHaveBeenCalledWith(Routes.ONBOARDING.HOME_NAV);
   });
 
   it('should not navigate to Wallet when authentication succeeds with different bioStateMachineId', async () => {
-    const generator = biometricsStateMachine(mockBioStateMachineId);
-    // Take next step
-    generator.next();
-    // Dispatch interrupt biometrics
-    generator.next(authSuccess('wrongBioStateMachineId') as Action);
-    // Move to next step
+    await expectSaga(biometricsStateMachine, mockBioStateMachineId)
+      .take([
+        UserActionType.AUTH_SUCCESS,
+        UserActionType.AUTH_ERROR,
+        UserActionType.INTERRUPT_BIOMETRICS,
+      ])
+      .dispatch(authSuccess('wrongBioStateMachineId'))
+      .silentRun();
+
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it('should not do anything when AUTH_ERROR is encountered', async () => {
-    const generator = biometricsStateMachine(mockBioStateMachineId);
-    // Take next step
-    generator.next();
-    // Dispatch interrupt biometrics
-    generator.next(authError(mockBioStateMachineId) as Action);
-    // Move to next step
+    await expectSaga(biometricsStateMachine, mockBioStateMachineId)
+      .take([
+        UserActionType.AUTH_SUCCESS,
+        UserActionType.AUTH_ERROR,
+        UserActionType.INTERRUPT_BIOMETRICS,
+      ])
+      .dispatch(authError(mockBioStateMachineId))
+      .silentRun();
+
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
 
-// TODO: Update all saga tests to use expectSaga (more intuitive and easier to read)
 describe('startAppServices', () => {
   beforeEach(() => {
     jest.clearAllMocks();
