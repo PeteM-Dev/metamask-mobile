@@ -26,6 +26,7 @@ import { oldConfirmationsRemoteFeatureFlags } from '../api-mocking/mock-response
 
 const port = getGanachePort(8545, process.pid);
 const chainId = 1337;
+const platform = process.env.PLATFORM || 'ios';
 
 const main = async () => {
   const openrpcDocument = await parseOpenRPCDocument(
@@ -194,6 +195,10 @@ const main = async () => {
         'eth_signTypedData_v4', // requires permissions for eth_accounts
         'wallet_switchEthereumChain',
         'eth_getEncryptionPublicKey', // requires permissions for eth_accounts
+        'eth_sendTransaction',
+        'eth_estimateGas',
+        'eth_getTransactionReceipt',
+        'eth_getBalance',
       ];
 
       // replace this with pulling tags out of the api-spec
@@ -221,8 +226,9 @@ const main = async () => {
         'wallet_registerOnboarding',
         'eth_getEncryptionPublicKey',
         'wallet_watchAsset',
-        'personal_sign', // quarantined for now due to mysterious flakiness, resolution tracked here: https://github.com/MetaMask/MetaMask-planning/issues/5207
-        'eth_signTypedData_v4', // quarantined for now due to mysterious flakiness, resolution tracked here: https://github.com/MetaMask/MetaMask-planning/issues/5207
+        // 'personal_sign',
+        // 'eth_signTypedData_v4',
+        ...(platform === 'android' ? ['wallet_addEthereumChain'] : []), // Platform-specific exclusions
       ];
 
       const results = await rpcCoverageTool({
